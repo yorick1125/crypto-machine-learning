@@ -1,438 +1,149 @@
 import { useState, useEffect } from 'react';
-import { Wallet, Send, ArrowDownLeft, ArrowUpRight, Eye, EyeOff, Copy, QrCode, RefreshCw, Bitcoin, Zap, Plus, History, Shield, Settings } from 'lucide-react';
 
-interface WalletBalance {
-  btc: number;
-  eth: number;
-  btcCad: number;
-  ethCad: number;
+// Define the shape of the data we expect from the CoinGecko API.
+// This helps with type safety and eliminates VS Code's "red squiggly lines" (linter warnings).
+interface CryptoPriceData {
+  cad: number;
+  cad_24h_change: number;
 }
 
-interface Transaction {
-  id: string;
-  type: 'sent' | 'received';
-  currency: 'BTC' | 'ETH';
-  amount: number;
-  cadAmount: number;
-  address: string;
-  timestamp: Date;
-  status: 'pending' | 'confirmed' | 'failed';
-  fee?: number;
+interface CryptoData {
+  bitcoin?: CryptoPriceData;
+  ethereum?: CryptoPriceData;
 }
 
-interface CryptoPrices {
-  btc: number;
-  eth: number;
-}
+// This is the main component of the application.
+export default function App() {
+  // State variables for storing the fetched cryptocurrency data, loading status, and any errors.
+  // We initialize cryptoData with an empty object of type CryptoData to be type-safe.
+  const [cryptoData, setCryptoData] = useState<CryptoData>({});
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-export default function CryptoWallet() {
-  const [activeTab, setActiveTab] = useState<'wallet' | 'send' | 'receive' | 'history'>('wallet');
-  const [balanceVisible, setBalanceVisible] = useState(true);
-  const [selectedCurrency, setSelectedCurrency] = useState<'BTC' | 'ETH'>('BTC');
-  const [loading, setLoading] = useState(false);
-  const [prices, setPrices] = useState<CryptoPrices>({ btc: 65000, eth: 3500 });
-  
-  // Wallet state
-  const [walletBalance, setWalletBalance] = useState<WalletBalance>({
-    btc: 0.02547831,
-    eth: 1.25643210,
-    btcCad: 0,
-    ethCad: 0
-  });
-  
-  const [walletAddress] = useState({
-    BTC: 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
-    ETH: '0x742d35Cc6634C0532925a3b8D9F9EL8f7E1b19Ce'
-  });
-  
-  const [transactions, setTransactions] = useState<Transaction[]>([
-    {
-      id: '1',
-      type: 'received',
-      currency: 'BTC',
-      amount: 0.01234567,
-      cadAmount: 802.50,
-      address: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4',
-      timestamp: new Date('2024-12-15T10:30:00'),
-      status: 'confirmed'
-    },
-    {
-      id: '2',
-      type: 'sent',
-      currency: 'ETH',
-      amount: 0.5,
-      cadAmount: 1750.00,
-      address: '0x8ba1f109551bD432803012645Hac136c',
-      timestamp: new Date('2024-12-14T15:45:00'),
-      status: 'confirmed',
-      fee: 0.002
-    },
-    {
-      id: '3',
-      type: 'received',
-      currency: 'ETH',
-      amount: 1.0,
-      cadAmount: 3500.00,
-      address: '0x9ba2f209661cD542804123456Hac246d',
-      timestamp: new Date('2024-12-13T09:15:00'),
-      status: 'confirmed'
-    }
-  ]);
-  
-  const [sendForm, setSendForm] = useState({
-    amount: '',
-    address: '',
-    note: ''
-  });
-  
-  // Fetch prices (simulated)
-  const fetchPrices = async () => {
-    setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setPrices({ btc: 65000 + Math.random() * 2000 - 1000, eth: 3500 + Math.random() * 200 - 100 });
-      setLoading(false);
-    }, 1000);
-  };
-  
+  // useEffect hook to handle the API call when the component mounts.
   useEffect(() => {
-    const updateCADValues = () => {
-      setWalletBalance(prev => ({
-        ...prev,
-        btcCad: prev.btc * prices.btc,
-        ethCad: prev.eth * prices.eth
-      }));
+    // This is the CoinGecko API endpoint to get prices for Bitcoin and Ethereum in Canadian Dollars (CAD).
+    // We also include the 24-hour price change to help with our analysis logic.
+    const API_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=cad&include_24hr_change=true';
+
+    // Asynchronous function to fetch the data.
+    const fetchCryptoData = async () => {
+      try {
+        const response = await fetch(API_URL);
+        if (!response.ok) {
+          throw new Error('Failed to fetch cryptocurrency data');
+        }
+        const data: CryptoData = await response.json();
+        setCryptoData(data);
+      } catch (e) {
+        // Handle any errors that occur during the fetch process.
+        console.error("Error fetching crypto data:", e);
+        setError((e as Error).message); 
+      } finally {
+        setLoading(false);
+      }
     };
-    updateCADValues();
-  }, [prices, walletBalance.btc, walletBalance.eth]);
-  
-  useEffect(() => {
-    fetchPrices();
-    const interval = setInterval(fetchPrices, 30000);
-    return () => clearInterval(interval);
-  }, []);
-  
-  const formatCrypto = (amount: number, currency: 'BTC' | 'ETH') => {
-    return `${amount.toFixed(8)} ${currency}`;
+
+    fetchCryptoData();
+  }, []); 
+
+  const getEthereumSignal = () => {
+    const change = cryptoData.ethereum?.cad_24h_change;
+    if (change === undefined || change === null) {
+      return "N/A";
+    }
+    return change < 0 ? "BUY" : "SELL";
   };
-  
-  const formatCAD = (amount: number) => {
+
+  const formatCurrency = (value: number | undefined) => {
+    if (value === undefined || value === null) return "N/A";
     return new Intl.NumberFormat('en-CA', {
       style: 'currency',
-      currency: 'CAD'
-    }).format(amount);
+      currency: 'CAD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(value);
   };
-  
-  const getTotalBalance = () => {
-    return walletBalance.btcCad + walletBalance.ethCad;
+
+  const formatPercentage = (value: number | undefined) => {
+    if (value === undefined || value === null) return "N/A";
+    const formattedValue = value.toFixed(2);
+    const colorClass = value < 0 ? 'text-red-400' : 'text-green-400';
+    return <span className={colorClass}>{formattedValue}%</span>;
   };
-  
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    // In a real app, you'd show a toast notification
-  };
-  
-  const handleSend = () => {
-    if (!sendForm.amount || !sendForm.address) return;
-    
-    const newTransaction: Transaction = {
-      id: Date.now().toString(),
-      type: 'sent',
-      currency: selectedCurrency,
-      amount: parseFloat(sendForm.amount),
-      cadAmount: parseFloat(sendForm.amount) * (selectedCurrency === 'BTC' ? prices.btc : prices.eth),
-      address: sendForm.address,
-      timestamp: new Date(),
-      status: 'pending',
-      fee: selectedCurrency === 'BTC' ? 0.0001 : 0.002
-    };
-    
-    setTransactions(prev => [newTransaction, ...prev]);
-    
-    // Update balance
-    setWalletBalance(prev => ({
-      ...prev,
-      [selectedCurrency.toLowerCase()]: prev[selectedCurrency.toLowerCase() as keyof WalletBalance] - parseFloat(sendForm.amount)
-    }));
-    
-    setSendForm({ amount: '', address: '', note: '' });
-    setActiveTab('wallet');
-  };
-  
-  const WalletTab = () => (
-    <div className="space-y-6">
-      {/* Balance Card */}
-      <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-3xl p-8 text-white shadow-2xl">
-        <div className="flex justify-between items-start mb-6">
-          <div>
-            <p className="text-blue-100 text-sm font-medium">Total Balance</p>
-            <div className="flex items-center gap-3">
-              <h2 className="text-4xl font-bold">
-                {balanceVisible ? formatCAD(getTotalBalance()) : '••••••'}
-              </h2>
-              <button
-                onClick={() => setBalanceVisible(!balanceVisible)}
-                className="p-2 hover:bg-white/10 rounded-lg transition-colors"
-              >
-                {balanceVisible ? <Eye size={20} /> : <EyeOff size={20} />}
-              </button>
-            </div>
+
+  return (
+    <div className="bg-gray-900 min-h-screen p-8 text-gray-100 font-inter">
+      <div className="max-w-4xl mx-auto">
+        <header className="text-center mb-12">
+          <h1 className="text-5xl md:text-6xl font-extrabold text-white">Crypto Analysis Dashboard</h1>
+          <p className="mt-4 text-xl text-gray-400">
+            Real-time price analysis for Bitcoin and Ethereum.
+          </p>
+        </header>
+
+        {/* Conditional rendering for loading, error, and data states */}
+        {loading && (
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-green-500"></div>
+            <p className="ml-4 text-lg text-gray-300">Loading data...</p>
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={fetchPrices}
-              disabled={loading}
-              className="p-3 bg-white/10 hover:bg-white/20 rounded-xl transition-colors disabled:opacity-50"
-            >
-              <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
-            </button>
+        )}
+
+        {error && (
+          <div className="text-center p-8 bg-red-800 text-white rounded-xl shadow-lg">
+            <p className="text-xl font-semibold">Error: {error}</p>
+            <p className="mt-2">Please try again later.</p>
           </div>
-        </div>
-        
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Bitcoin size={24} className="text-orange-400" />
-              <span className="font-semibold">Bitcoin</span>
-            </div>
-            <p className="text-2xl font-bold">{balanceVisible ? formatCrypto(walletBalance.btc, 'BTC') : '•••••'}</p>
-            <p className="text-blue-100 text-sm">{balanceVisible ? formatCAD(walletBalance.btcCad) : '•••••'}</p>
-          </div>
-          
-          <div className="bg-white/10 backdrop-blur-sm rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <Zap size={24} className="text-blue-400" />
-              <span className="font-semibold">Ethereum</span>
-            </div>
-            <p className="text-2xl font-bold">{balanceVisible ? formatCrypto(walletBalance.eth, 'ETH') : '•••••'}</p>
-            <p className="text-blue-100 text-sm">{balanceVisible ? formatCAD(walletBalance.ethCad) : '•••••'}</p>
-          </div>
-        </div>
-      </div>
-      
-      {/* Quick Actions */}
-      <div className="grid grid-cols-3 gap-4">
-        <button
-          onClick={() => setActiveTab('send')}
-          className="flex flex-col items-center gap-3 p-6 bg-gray-800 hover:bg-gray-700 rounded-2xl transition-all hover:scale-105"
-        >
-          <div className="p-3 bg-red-600 rounded-xl">
-            <Send size={24} className="text-white" />
-          </div>
-          <span className="font-semibold text-white">Send</span>
-        </button>
-        
-        <button
-          onClick={() => setActiveTab('receive')}
-          className="flex flex-col items-center gap-3 p-6 bg-gray-800 hover:bg-gray-700 rounded-2xl transition-all hover:scale-105"
-        >
-          <div className="p-3 bg-green-600 rounded-xl">
-            <ArrowDownLeft size={24} className="text-white" />
-          </div>
-          <span className="font-semibold text-white">Receive</span>
-        </button>
-        
-        <button
-          onClick={() => setActiveTab('history')}
-          className="flex flex-col items-center gap-3 p-6 bg-gray-800 hover:bg-gray-700 rounded-2xl transition-all hover:scale-105"
-        >
-          <div className="p-3 bg-blue-600 rounded-xl">
-            <History size={24} className="text-white" />
-          </div>
-          <span className="font-semibold text-white">History</span>
-        </button>
-      </div>
-      
-      {/* Recent Transactions */}
-      <div className="bg-gray-800/50 rounded-2xl p-6">
-        <h3 className="text-xl font-bold text-white mb-4">Recent Activity</h3>
-        <div className="space-y-3">
-          {transactions.slice(0, 3).map((tx) => (
-            <div key={tx.id} className="flex items-center justify-between p-4 bg-gray-700/50 rounded-xl">
-              <div className="flex items-center gap-3">
-                <div className={`p-2 rounded-lg ${tx.type === 'sent' ? 'bg-red-600' : 'bg-green-600'}`}>
-                  {tx.type === 'sent' ? <ArrowUpRight size={16} /> : <ArrowDownLeft size={16} />}
-                </div>
-                <div>
-                  <p className="text-white font-medium">
-                    {tx.type === 'sent' ? 'Sent' : 'Received'} {tx.currency}
-                  </p>
-                  <p className="text-gray-400 text-sm">{tx.timestamp.toLocaleDateString()}</p>
+        )}
+
+        {!loading && !error && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            {/* Bitcoin Card */}
+            <div className="bg-gray-800 p-8 rounded-2xl shadow-xl hover:shadow-2xl transition-shadow duration-300">
+              <div className="flex items-center mb-4">
+                <svg className="h-10 w-10 text-orange-400 mr-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5.72 13.96c-.66.8-1.57 1.34-2.6 1.62-.28.08-.5.1-.73.1-.76 0-1.22-.38-1.22-.96 0-.32.14-.54.5-.72.36-.18.8-.32 1.3-.42.5-.1.9-.22 1.28-.4.36-.18.54-.42.54-.7.04-.3-.14-.5-.46-.66-.32-.14-.72-.22-1.18-.22-.64 0-1.16.2-1.56.58-.4.38-.6.9-.64 1.5l-2.02.46c.06-1.1.48-1.92 1.28-2.58.8-.66 1.72-1.04 2.82-1.04.88 0 1.5.2 1.88.54.4.32.6.72.6 1.18 0 .4-.1.74-.3.98-.2.24-.5.42-.84.54-.34.12-.66.2-.9.24-.26.04-.42.06-.5.06-.2 0-.38-.02-.54-.06-.16-.04-.3-.1-.4-.14-.14-.04-.2-.1-.2-.18v-1.6c.06-.2.16-.36.3-.5.14-.14.3-.24.5-.32.2-.08.42-.1.66-.1.68 0 1.2.2 1.54.6.34.4.52.88.52 1.48 0 .62-.22 1.1-.64 1.48z"/>
+                </svg>
+                <h2 className="text-3xl font-bold text-white">Bitcoin (BTC)</h2>
+              </div>
+              <p className="text-5xl font-bold text-white mt-4">{formatCurrency(cryptoData.bitcoin?.cad)}</p>
+              <div className="mt-4 flex justify-between items-center">
+                <p className="text-lg text-gray-400">24h Change: {formatPercentage(cryptoData.bitcoin?.cad_24h_change)}</p>
+                <div className="px-4 py-2 rounded-full font-bold text-lg bg-green-600 text-white shadow-md">
+                  BUY
                 </div>
               </div>
-              <div className="text-right">
-                <p className={`font-bold ${tx.type === 'sent' ? 'text-red-400' : 'text-green-400'}`}>
-                  {tx.type === 'sent' ? '-' : '+'}{formatCrypto(tx.amount, tx.currency)}
-                </p>
-                <p className="text-gray-400 text-sm">{formatCAD(tx.cadAmount)}</p>
+            </div>
+
+            {/* Ethereum Card */}
+            <div className="bg-gray-800 p-8 rounded-2xl shadow-xl hover:shadow-2xl transition-shadow duration-300">
+              <div className="flex items-center mb-4">
+                <svg className="h-10 w-10 text-gray-300 mr-4" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M12 2L2 12l10 10 10-10L12 2zm0 1.58L19.42 10 12 18.42 4.58 10 12 3.58zM12 5.6L5.6 12 12 18.4l6.4-6.4L12 5.6z"/>
+                </svg>
+                <h2 className="text-3xl font-bold text-white">Ethereum (ETH)</h2>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-  
-  const SendTab = () => (
-    <div className="space-y-6">
-      <div className="bg-gray-800/50 rounded-2xl p-6">
-        <h3 className="text-xl font-bold text-white mb-6">Send Cryptocurrency</h3>
-        
-        {/* Currency Selection */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <button
-            onClick={() => setSelectedCurrency('BTC')}
-            className={`flex items-center gap-3 p-4 rounded-xl transition-all ${
-              selectedCurrency === 'BTC' 
-                ? 'bg-orange-600 text-white' 
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            <Bitcoin size={24} />
-            <div className="text-left">
-              <p className="font-semibold">Bitcoin</p>
-              <p className="text-sm opacity-80">{formatCrypto(walletBalance.btc, 'BTC')}</p>
-            </div>
-          </button>
-          
-          <button
-            onClick={() => setSelectedCurrency('ETH')}
-            className={`flex items-center gap-3 p-4 rounded-xl transition-all ${
-              selectedCurrency === 'ETH' 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            <Zap size={24} />
-            <div className="text-left">
-              <p className="font-semibold">Ethereum</p>
-              <p className="text-sm opacity-80">{formatCrypto(walletBalance.eth, 'ETH')}</p>
-            </div>
-          </button>
-        </div>
-        
-        {/* Send Form */}
-        <div className="space-y-4">
-          <div>
-            <label className="block text-white font-medium mb-2">Amount</label>
-            <div className="relative">
-              <input
-                type="number"
-                value={sendForm.amount}
-                onChange={(e) => setSendForm(prev => ({ ...prev, amount: e.target.value }))}
-                placeholder={`0.00000000 ${selectedCurrency}`}
-                step="0.00000001"
-                className="w-full p-4 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-              <div className="absolute right-4 top-4 text-gray-400 text-sm">
-                ≈ {formatCAD(parseFloat(sendForm.amount || '0') * (selectedCurrency === 'BTC' ? prices.btc : prices.eth))}
+              <p className="text-5xl font-bold text-white mt-4">{formatCurrency(cryptoData.ethereum?.cad)}</p>
+              <div className="mt-4 flex justify-between items-center">
+                <p className="text-lg text-gray-400">24h Change: {formatPercentage(cryptoData.ethereum?.cad_24h_change)}</p>
+                <div className={`px-4 py-2 rounded-full font-bold text-lg shadow-md ${getEthereumSignal() === "BUY" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`}>
+                  {getEthereumSignal()}
+                </div>
               </div>
             </div>
           </div>
-          
-          <div>
-            <label className="block text-white font-medium mb-2">Recipient Address</label>
-            <input
-              type="text"
-              value={sendForm.address}
-              onChange={(e) => setSendForm(prev => ({ ...prev, address: e.target.value }))}
-              placeholder={selectedCurrency === 'BTC' ? 'bc1q...' : '0x...'}
-              className="w-full p-4 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-white font-medium mb-2">Note (Optional)</label>
-            <input
-              type="text"
-              value={sendForm.note}
-              onChange={(e) => setSendForm(prev => ({ ...prev, note: e.target.value }))}
-              placeholder="Add a note..."
-              className="w-full p-4 bg-gray-700 border border-gray-600 rounded-xl text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-        </div>
-        
-        {/* Transaction Fee */}
-        <div className="mt-6 p-4 bg-gray-700/50 rounded-xl">
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-400">Network Fee:</span>
-            <span className="text-white">
-              {formatCrypto(selectedCurrency === 'BTC' ? 0.0001 : 0.002, selectedCurrency)}
-            </span>
-          </div>
-          <div className="flex justify-between text-sm mt-1">
-            <span className="text-gray-400">Total Amount:</span>
-            <span className="text-white font-medium">
-              {formatCrypto(
-                (parseFloat(sendForm.amount || '0')) + (selectedCurrency === 'BTC' ? 0.0001 : 0.002), 
-                selectedCurrency
-              )}
-            </span>
-          </div>
-        </div>
-        
-        <button
-          onClick={handleSend}
-          disabled={!sendForm.amount || !sendForm.address}
-          className="w-full mt-6 p-4 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-xl text-white font-semibold transition-colors"
-        >
-          Send {selectedCurrency}
-        </button>
-      </div>
-    </div>
-  );
-  
-  const ReceiveTab = () => (
-    <div className="space-y-6">
-      <div className="bg-gray-800/50 rounded-2xl p-6">
-        <h3 className="text-xl font-bold text-white mb-6">Receive Cryptocurrency</h3>
-        
-        {/* Currency Selection */}
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <button
-            onClick={() => setSelectedCurrency('BTC')}
-            className={`flex items-center gap-3 p-4 rounded-xl transition-all ${
-              selectedCurrency === 'BTC' 
-                ? 'bg-orange-600 text-white' 
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            <Bitcoin size={24} />
-            <span className="font-semibold">Bitcoin</span>
-          </button>
-          
-          <button
-            onClick={() => setSelectedCurrency('ETH')}
-            className={`flex items-center gap-3 p-4 rounded-xl transition-all ${
-              selectedCurrency === 'ETH' 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-            }`}
-          >
-            <Zap size={24} />
-            <span className="font-semibold">Ethereum</span>
-          </button>
-        </div>
-        
-        {/* QR Code Placeholder */}
-        <div className="flex flex-col items-center space-y-4">
-          <div className="w-48 h-48 bg-white rounded-2xl flex items-center justify-center">
-            <QrCode size={120} className="text-gray-800" />
-          </div>
-          
-          <p className="text-gray-400 text-center">
-            Scan this QR code to receive {selectedCurrency}
+        )}
+
+        {/* User's message section */}
+        <div className="mt-12 p-8 bg-gray-800 rounded-2xl shadow-xl">
+          <h3 className="text-2xl font-bold text-white mb-4">Important Information</h3>
+          <p className="text-lg text-gray-400 leading-relaxed">
+            Buy Ethereum low and sell Ethereum high in exchange for Bitcoin on a trusted Canadian crypto exchange, and then transfer the Bitcoin to your own self-custody cold wallet.
           </p>
         </div>
-        
-        {/* Address */}
-        <div className="mt-6">
-          <label className="block text-white font-medium mb-2">Your {selectedCurrency} Address</label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={walletAddress[selectedCurrency]}
-              readOnly
-              className="flex-1 p-4 bg-gray-700 border border-gray-600 rounded-xl text-white"
-            />
+      </div>
+    </div>
+  );
+}
+
